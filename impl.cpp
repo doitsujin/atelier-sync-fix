@@ -240,7 +240,7 @@ ID3D11Resource* createShadowResourceLocked(
   ATFIX_RESOURCE_INFO resourceInfo = { };
   getResourceInfo(pBaseResource, &resourceInfo);
 
-  ID3D11Resource* shadowResource;
+  ID3D11Resource* shadowResource = nullptr;
   HRESULT hr;
 
   switch (resourceInfo.Dim) {
