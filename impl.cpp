@@ -7,8 +7,16 @@
 namespace atfix {
 
 /** Hooking-related stuff */
+using PFN_ID3D11Device_CreateBuffer = HRESULT (STDMETHODCALLTYPE *) (ID3D11Device*,
+  const D3D11_BUFFER_DESC*, const D3D11_SUBRESOURCE_DATA*, ID3D11Buffer**);
 using PFN_ID3D11Device_CreateDeferredContext = HRESULT (STDMETHODCALLTYPE *) (ID3D11Device*,
   UINT, ID3D11DeviceContext**);
+using PFN_ID3D11Device_CreateTexture1D = HRESULT (STDMETHODCALLTYPE *) (ID3D11Device*,
+  const D3D11_TEXTURE1D_DESC*, const D3D11_SUBRESOURCE_DATA*, ID3D11Texture1D**);
+using PFN_ID3D11Device_CreateTexture2D = HRESULT (STDMETHODCALLTYPE *) (ID3D11Device*,
+  const D3D11_TEXTURE2D_DESC*, const D3D11_SUBRESOURCE_DATA*, ID3D11Texture2D**);
+using PFN_ID3D11Device_CreateTexture3D = HRESULT (STDMETHODCALLTYPE *) (ID3D11Device*,
+  const D3D11_TEXTURE3D_DESC*, const D3D11_SUBRESOURCE_DATA*, ID3D11Texture3D**);
 
 using PFN_ID3D11DeviceContext_ClearRenderTargetView = void (STDMETHODCALLTYPE *) (ID3D11DeviceContext*,
   ID3D11RenderTargetView*, const FLOAT[4]);
@@ -34,7 +42,11 @@ using PFN_ID3D11DeviceContext_UpdateSubresource = void (STDMETHODCALLTYPE *) (ID
   ID3D11Resource*, UINT, const D3D11_BOX*, const void*, UINT, UINT);
 
 struct DeviceProcs {
+  PFN_ID3D11Device_CreateBuffer                         CreateBuffer                  = nullptr;
   PFN_ID3D11Device_CreateDeferredContext                CreateDeferredContext         = nullptr;
+  PFN_ID3D11Device_CreateTexture1D                      CreateTexture1D               = nullptr;
+  PFN_ID3D11Device_CreateTexture2D                      CreateTexture2D               = nullptr;
+  PFN_ID3D11Device_CreateTexture3D                      CreateTexture3D               = nullptr;
 };
 
 struct ContextProcs {
@@ -235,15 +247,17 @@ bool isImmediatecontext(
 bool isCpuWritableResource(
   const ATFIX_RESOURCE_INFO*      pInfo) {
   return (pInfo->Usage == D3D11_USAGE_STAGING || pInfo->Usage == D3D11_USAGE_DYNAMIC)
-      && pInfo->Layers == 1
-      && pInfo->Mips == 1;
+      && (pInfo->CPUFlags & D3D11_CPU_ACCESS_WRITE)
+      && (pInfo->Layers == 1)
+      && (pInfo->Mips == 1);
 }
 
 bool isCpuReadableResource(
   const ATFIX_RESOURCE_INFO*      pInfo) {
-  return pInfo->Usage == D3D11_USAGE_STAGING
-      && pInfo->Layers == 1
-      && pInfo->Mips == 1;
+  return (pInfo->Usage == D3D11_USAGE_STAGING)
+      && (pInfo->CPUFlags & D3D11_CPU_ACCESS_READ)
+      && (pInfo->Layers == 1)
+      && (pInfo->Mips == 1);
 }
 
 ID3D11Resource* createShadowResourceLocked(
@@ -273,6 +287,7 @@ ID3D11Resource* createShadowResourceLocked(
       desc.BindFlags = 0;
       desc.MiscFlags = 0;
       desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE | D3D11_CPU_ACCESS_READ;
+      desc.StructureByteStride = 0;
 
       ID3D11Buffer* shadowBuffer = nullptr;
       hr = device->CreateBuffer(&desc, nullptr, &shadowBuffer);
@@ -515,6 +530,23 @@ void updateUavShadowResources(
   }
 }
 
+HRESULT STDMETHODCALLTYPE ID3D11Device_CreateBuffer(
+        ID3D11Device*             pDevice,
+  const D3D11_BUFFER_DESC*        pDesc,
+  const D3D11_SUBRESOURCE_DATA*   pData,
+        ID3D11Buffer**            ppBuffer) {
+  auto procs = getDeviceProcs(pDevice);
+  D3D11_BUFFER_DESC desc;
+
+  if (pDesc && pDesc->Usage == D3D11_USAGE_STAGING) {
+    desc = *pDesc;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+    pDesc = &desc;
+  }
+
+  return procs->CreateBuffer(pDevice, pDesc, pData, ppBuffer);
+}
+
 HRESULT STDMETHODCALLTYPE ID3D11Device_CreateDeferredContext(
         ID3D11Device*             pDevice,
         UINT                      Flags,
@@ -526,6 +558,57 @@ HRESULT STDMETHODCALLTYPE ID3D11Device_CreateDeferredContext(
     hookContext(*ppDeferredContext);
 
   return hr;
+}
+
+HRESULT STDMETHODCALLTYPE ID3D11Device_CreateTexture1D(
+        ID3D11Device*             pDevice,
+  const D3D11_TEXTURE1D_DESC*     pDesc,
+  const D3D11_SUBRESOURCE_DATA*   pData,
+        ID3D11Texture1D**         ppTexture) {
+  auto procs = getDeviceProcs(pDevice);
+  D3D11_TEXTURE1D_DESC desc;
+
+  if (pDesc && pDesc->Usage == D3D11_USAGE_STAGING) {
+    desc = *pDesc;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+    pDesc = &desc;
+  }
+
+  return procs->CreateTexture1D(pDevice, pDesc, pData, ppTexture);
+}
+
+HRESULT STDMETHODCALLTYPE ID3D11Device_CreateTexture2D(
+        ID3D11Device*             pDevice,
+  const D3D11_TEXTURE2D_DESC*     pDesc,
+  const D3D11_SUBRESOURCE_DATA*   pData,
+        ID3D11Texture2D**         ppTexture) {
+  auto procs = getDeviceProcs(pDevice);
+  D3D11_TEXTURE2D_DESC desc;
+
+  if (pDesc && pDesc->Usage == D3D11_USAGE_STAGING) {
+    desc = *pDesc;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+    pDesc = &desc;
+  }
+
+  return procs->CreateTexture2D(pDevice, pDesc, pData, ppTexture);
+}
+
+HRESULT STDMETHODCALLTYPE ID3D11Device_CreateTexture3D(
+        ID3D11Device*             pDevice,
+  const D3D11_TEXTURE3D_DESC*     pDesc,
+  const D3D11_SUBRESOURCE_DATA*   pData,
+        ID3D11Texture3D**         ppTexture) {
+  auto procs = getDeviceProcs(pDevice);
+  D3D11_TEXTURE3D_DESC desc;
+
+  if (pDesc && pDesc->Usage == D3D11_USAGE_STAGING) {
+    desc = *pDesc;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+    pDesc = &desc;
+  }
+
+  return procs->CreateTexture3D(pDevice, pDesc, pData, ppTexture);
 }
 
 void STDMETHODCALLTYPE ID3D11DeviceContext_ClearRenderTargetView(
@@ -616,8 +699,10 @@ HRESULT tryCpuCopy(
   }
 
   if (FAILED(hr)) {
-    if (hr != DXGI_ERROR_WAS_STILL_DRAWING)
+    if (hr != DXGI_ERROR_WAS_STILL_DRAWING) {
       log("Failed to map destination resource, hr 0x", std::hex, hr);
+      log("Resource dim ", dstInfo.Dim, ", size ", dstInfo.Width , "x", dstInfo.Height, ", usage ", dstInfo.Usage);
+    }
     return hr;
   }
 
@@ -639,6 +724,7 @@ HRESULT tryCpuCopy(
 
     if (FAILED(hr)) {
       log("Failed to map source resource, hr 0x", std::hex, hr);
+      log("Resource dim ", srcInfo.Dim, ", size ", srcInfo.Width , "x", srcInfo.Height, ", usage ", srcInfo.Usage);
       pContext->Unmap(pDstResource, DstSubresource);
       return hr;
     }
@@ -889,7 +975,11 @@ void hookDevice(ID3D11Device* pDevice) {
   log("Hooking device ", pDevice);
 
   DeviceProcs* procs = &g_deviceProcs;
+  HOOK_PROC(ID3D11Device, pDevice, procs, 3,  CreateBuffer);
   HOOK_PROC(ID3D11Device, pDevice, procs, 27, CreateDeferredContext);
+  HOOK_PROC(ID3D11Device, pDevice, procs, 4,  CreateTexture1D);
+  HOOK_PROC(ID3D11Device, pDevice, procs, 5,  CreateTexture2D);
+  HOOK_PROC(ID3D11Device, pDevice, procs, 6,  CreateTexture3D);
 
   g_installedHooks |= HOOK_DEVICE;
 }
