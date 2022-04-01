@@ -759,6 +759,8 @@ HRESULT tryCpuCopy(
   if (shadowResource) {
     pContext->Unmap(shadowResource, SrcSubresource);
     shadowResource->Release();
+  } else {
+    pContext->Unmap(pSrcResource, SrcSubresource);
   }
 
   return S_OK;
