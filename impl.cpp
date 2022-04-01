@@ -3,7 +3,6 @@
 
 #include "impl.h"
 #include "util.h"
-#include "vtablehook.h"
 
 namespace atfix {
 
@@ -52,10 +51,28 @@ struct ContextProcs {
   PFN_ID3D11DeviceContext_UpdateSubresource             UpdateSubresource             = nullptr;
 };
 
-static mutex                                             g_hookMutex;
-static mutex                                             g_globalMutex;
-static DispatchTable<ID3D11Device,        DeviceProcs>   g_deviceProcs;
-static DispatchTable<ID3D11DeviceContext, ContextProcs>  g_contextProcs;
+static mutex  g_hookMutex;
+static mutex  g_globalMutex;
+
+DeviceProcs   g_deviceProcs;
+ContextProcs  g_immContextProcs;
+ContextProcs  g_defContextProcs;
+
+constexpr uint32_t HOOK_DEVICE  = (1u << 0);
+constexpr uint32_t HOOK_IMM_CTX = (1u << 1);
+constexpr uint32_t HOOK_DEF_CTX = (1u << 2);
+
+uint32_t      g_installedHooks = 0u;
+
+const DeviceProcs* getDeviceProcs(ID3D11Device* pDevice) {
+  return &g_deviceProcs;
+}
+
+const ContextProcs* getContextProcs(ID3D11DeviceContext* pContext) {
+  return pContext->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE
+    ? &g_immContextProcs
+    : &g_defContextProcs;
+}
 
 /** Metadata */
 static const GUID IID_StagingShadowResource = {0xe2728d91,0x9fdd,0x40d0,{0x87,0xa8,0x09,0xb6,0x2d,0xf3,0x14,0x9a}};
@@ -232,7 +249,7 @@ bool isCpuReadableResource(
 ID3D11Resource* createShadowResourceLocked(
         ID3D11DeviceContext*      pContext,
         ID3D11Resource*           pBaseResource) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
 
   ID3D11Device* device = nullptr;
   pContext->GetDevice(&device);
@@ -367,7 +384,7 @@ ID3D11Resource* getOrCreateShadowResource(
 void updateViewShadowResource(
         ID3D11DeviceContext*      pContext,
         ID3D11View*               pView) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
 
   ID3D11Resource* baseResource;
   pView->GetResource(&baseResource);
@@ -502,7 +519,7 @@ HRESULT STDMETHODCALLTYPE ID3D11Device_CreateDeferredContext(
         ID3D11Device*             pDevice,
         UINT                      Flags,
         ID3D11DeviceContext**     ppDeferredContext) {
-  auto procs = g_deviceProcs.find(pDevice);
+  auto procs = getDeviceProcs(pDevice);
   HRESULT hr = procs->CreateDeferredContext(pDevice, Flags, ppDeferredContext);
 
   if (SUCCEEDED(hr) && ppDeferredContext)
@@ -515,7 +532,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_ClearRenderTargetView(
         ID3D11DeviceContext*      pContext,
         ID3D11RenderTargetView*   pRTV,
   const FLOAT                     pColor[4]) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
   procs->ClearRenderTargetView(pContext, pRTV, pColor);
 
   if (pRTV)
@@ -526,7 +543,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_ClearUnorderedAccessViewFloat(
         ID3D11DeviceContext*      pContext,
         ID3D11UnorderedAccessView* pUAV,
   const FLOAT                     pColor[4]) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
   procs->ClearUnorderedAccessViewFloat(pContext, pUAV, pColor);
 
   if (pUAV)
@@ -537,7 +554,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_ClearUnorderedAccessViewUint(
         ID3D11DeviceContext*      pContext,
         ID3D11UnorderedAccessView* pUAV,
   const UINT                      pColor[4]) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
   procs->ClearUnorderedAccessViewUint(pContext, pUAV, pColor);
 
   if (pUAV)
@@ -665,7 +682,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_CopyResource(
         ID3D11DeviceContext*      pContext,
         ID3D11Resource*           pDstResource,
         ID3D11Resource*           pSrcResource) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
 
   ID3D11Resource* dstShadow = getShadowResource(pDstResource);
 
@@ -705,7 +722,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_CopySubresourceRegion(
         ID3D11Resource*           pSrcResource,
         UINT                      SrcSubresource,
   const D3D11_BOX*                pSrcBox) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
 
   ID3D11Resource* dstShadow = getShadowResource(pDstResource);
 
@@ -751,7 +768,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_CopyStructureCount(
         ID3D11Buffer*             pDstBuffer,
         UINT                      DstOffset,
         ID3D11UnorderedAccessView* pSrcUav) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
   procs->CopyStructureCount(pContext, pDstBuffer, DstOffset, pSrcUav);
 
   ID3D11Resource* shadowResource = getShadowResource(pDstBuffer);
@@ -771,7 +788,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_Dispatch(
         UINT                      X,
         UINT                      Y,
         UINT                      Z) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
   procs->Dispatch(pContext, X, Y, Z);
 
   updateUavShadowResources(pContext);
@@ -781,7 +798,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_DispatchIndirect(
         ID3D11DeviceContext*      pContext,
         ID3D11Buffer*             pParameterBuffer,
         UINT                      pParameterOffset) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
   procs->DispatchIndirect(pContext, pParameterBuffer, pParameterOffset);
 
   updateUavShadowResources(pContext);
@@ -792,7 +809,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_OMSetRenderTargets(
         UINT                      RTVCount,
         ID3D11RenderTargetView* const* ppRTVs,
         ID3D11DepthStencilView*   pDSV) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
   updateRtvShadowResources(pContext);
 
   procs->OMSetRenderTargets(pContext, RTVCount, ppRTVs, pDSV);
@@ -807,7 +824,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_OMSetRenderTargetsAndUnorderedAccessV
         UINT                      UAVCount,
         ID3D11UnorderedAccessView* const* ppUAVs,
   const UINT*                     pUAVClearValues) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
   updateRtvShadowResources(pContext);
 
   procs->OMSetRenderTargetsAndUnorderedAccessViews(pContext,
@@ -822,7 +839,7 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_UpdateSubresource(
   const void*                     pData,
         UINT                      RowPitch,
         UINT                      SlicePitch) {
-  auto procs = g_contextProcs.find(pContext);
+  auto procs = getContextProcs(pContext);
 
   procs->UpdateSubresource(pContext, pResource,
     Subresource, pBox, pData, RowPitch, SlicePitch);
@@ -837,41 +854,62 @@ void STDMETHODCALLTYPE ID3D11DeviceContext_UpdateSubresource(
 }
 
 #define HOOK_PROC(iface, object, table, index, proc) \
-  hookProc(object, #iface "::" #proc, &table.proc, &iface ## _ ## proc, index)
+  hookProc(object, #iface "::" #proc, &table->proc, &iface ## _ ## proc, index)
 
 template<typename T>
 void hookProc(void* pObject, const char* pName, T** ppOrig, T* pHook, uint32_t index) {
-  *ppOrig = reinterpret_cast<T*>(vtablehook_hook(pObject, reinterpret_cast<void*>(pHook), index));
-  log(pName, " @ ", reinterpret_cast<void*>(*ppOrig), " -> ", reinterpret_cast<void*>(pHook));
+  void** vtbl = *reinterpret_cast<void***>(pObject);
+
+  MH_STATUS mh = MH_CreateHook(vtbl[index],
+    reinterpret_cast<void*>(pHook),
+    reinterpret_cast<void**>(ppOrig));
+
+  if (mh) {
+    if (mh != MH_ERROR_ALREADY_CREATED)
+      log("Failed to create hook for ", pName, ": ", MH_StatusToString(mh));
+    return;
+  }
+
+  mh = MH_EnableHook(vtbl[index]);
+
+  if (mh) {
+    log("Failed to enable hook for ", pName, ": ", MH_StatusToString(mh));
+    return;
+  }
+
+  log("Created hook for ", pName, " @ ", reinterpret_cast<void*>(pHook));
 }
 
 void hookDevice(ID3D11Device* pDevice) {
-  if (g_deviceProcs.find(pDevice))
-    return;
-
   std::lock_guard lock(g_hookMutex);
-  if (g_deviceProcs.find(pDevice))
+
+  if (g_installedHooks & HOOK_DEVICE)
     return;
 
   log("Hooking device ", pDevice);
 
-  DeviceProcs procs;
+  DeviceProcs* procs = &g_deviceProcs;
   HOOK_PROC(ID3D11Device, pDevice, procs, 27, CreateDeferredContext);
 
-  g_deviceProcs.insert(pDevice, procs);
+  g_installedHooks |= HOOK_DEVICE;
 }
 
 void hookContext(ID3D11DeviceContext* pContext) {
-  if (g_contextProcs.find(pContext))
-    return;
-
   std::lock_guard lock(g_hookMutex);
-  if (g_contextProcs.find(pContext))
+
+  uint32_t flag = HOOK_IMM_CTX;
+  ContextProcs* procs = &g_immContextProcs;
+
+  if (!isImmediatecontext(pContext)) {
+    flag = HOOK_DEF_CTX;
+    procs = &g_defContextProcs;
+  }
+
+  if (g_installedHooks & flag)
     return;
 
   log("Hooking context ", pContext);
 
-  ContextProcs procs;
   HOOK_PROC(ID3D11DeviceContext, pContext, procs, 50, ClearRenderTargetView);
   HOOK_PROC(ID3D11DeviceContext, pContext, procs, 52, ClearUnorderedAccessViewFloat);
   HOOK_PROC(ID3D11DeviceContext, pContext, procs, 51, ClearUnorderedAccessViewUint);
@@ -884,7 +922,11 @@ void hookContext(ID3D11DeviceContext* pContext) {
   HOOK_PROC(ID3D11DeviceContext, pContext, procs, 34, OMSetRenderTargetsAndUnorderedAccessViews);
   HOOK_PROC(ID3D11DeviceContext, pContext, procs, 48, UpdateSubresource);
 
-  g_contextProcs.insert(pContext, procs);
+  g_installedHooks |= flag;
+
+  /* Immediate context and deferred context methods may share code */
+  if (flag & HOOK_IMM_CTX)
+    g_defContextProcs = g_immContextProcs;
 }
 
 }

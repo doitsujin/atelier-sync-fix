@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include "impl.h"
 #include "util.h"
 
@@ -170,6 +172,20 @@ DLLEXPORT HRESULT __stdcall D3D11CreateDeviceAndSwapChain(
   device->Release();
   context->Release();
   return hr;
+}
+
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
+  switch (fdwReason) {
+    case DLL_PROCESS_ATTACH:
+      MH_Initialize();
+      break;
+
+    case DLL_PROCESS_DETACH:
+      MH_Uninitialize();
+      break;
+  }
+
+  return TRUE;
 }
 
 }

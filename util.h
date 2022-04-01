@@ -10,7 +10,7 @@
 #include <functional>
 #include <mutex>
 
-#include "vtablehook.h"
+#include "./minhook/include/MinHook.h"
 
 namespace atfix {
 
@@ -184,59 +184,6 @@ public:
 private:
 
   CONDITION_VARIABLE m_cond;
-
-};
-
-/**
- * \brief Thread-safe dispatch table lookup
- *
- * Holds dispatch tables for different objects.
- * \tparam K Key (object) type
- * \tparam T Dispatch table type
- */
-template<typename K, typename T>
-class DispatchTable {
-
-public:
-
-  bool insert(K* key, const T& data) {
-    uintptr_t k = vtablehook_get(key);
-
-    for (size_t i = 0; i < m_cache.size(); i++) {
-      uintptr_t e = (k + i) % m_cache.size();
-      uintptr_t d = 0;
-
-      if (m_cache[e].key.compare_exchange_strong(d, k)) {
-        m_cache[e].data = data;
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  const T* find(K* key) const {
-    uintptr_t k = vtablehook_get(key);
-
-    for (size_t i = 0; i < m_cache.size(); i++) {
-      uintptr_t e = (k + i) % m_cache.size();
-      uintptr_t c = m_cache[e].key.load(std::memory_order_acquire);
-
-      if (c == k)
-        return &m_cache[e].data;
-    }
-
-    return nullptr;
-  }
-
-private:
-
-  struct Entry {
-    std::atomic<uintptr_t> key = { 0ull };
-    T data;
-  };
-
-  std::array<Entry, 7> m_cache;
 
 };
 
