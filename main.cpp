@@ -8,7 +8,11 @@
 #include <cstdint>
 #include <cstring>
 
-#define DLLEXPORT __declspec(dllexport)
+#ifdef _MSC_VER
+  #define DLLEXPORT
+#else
+  #define DLLEXPORT __declspec(dllexport)
+#endif
 
 namespace atfix {
 
