@@ -112,7 +112,7 @@ DLLEXPORT HRESULT __stdcall D3D11CreateDevice(
     return hr;
 
   atfix::hookDevice(device);
-  atfix::hookContext(context);
+  context = atfix::hookContext(context);
 
   if (ppDevice) {
     device->AddRef();
@@ -167,7 +167,7 @@ DLLEXPORT HRESULT __stdcall D3D11CreateDeviceAndSwapChain(
     return hr;
 
   atfix::hookDevice(device);
-  atfix::hookContext(context);
+  context = atfix::hookContext(context);
 
   if (ppDevice) {
     device->AddRef();

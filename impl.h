@@ -7,7 +7,7 @@
 namespace atfix {
 
 void hookDevice(ID3D11Device* pDevice);
-void hookContext(ID3D11DeviceContext* pContext);
+ID3D11DeviceContext* hookContext(ID3D11DeviceContext* pContext);
 
 /* lives in main.cpp */
 extern Log log;
