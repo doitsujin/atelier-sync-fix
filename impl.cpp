@@ -1034,7 +1034,6 @@ public:
 };
 
 ID3D11DeviceContext* hookContext(ID3D11DeviceContext* pContext) {
-  log("Hooking context ", pContext);
   return new ContextWrapper(pContext);
 }
 
