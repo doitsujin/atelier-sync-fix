@@ -45,7 +45,7 @@ D3D11Proc loadSystemD3D11() {
   if (d3d11Proc.D3D11CreateDevice)
     return d3d11Proc;
 
-  HMODULE libD3D11 = LoadLibraryExA("d3d11_proxy.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
+  HMODULE libD3D11 = LoadLibraryA("d3d11_proxy.dll");
 
   if (libD3D11) {
     log("Using d3d11_proxy.dll");
@@ -112,7 +112,7 @@ DLLEXPORT HRESULT __stdcall D3D11CreateDevice(
     return hr;
 
   atfix::hookDevice(device);
-  atfix::hookContext(context);
+  context = atfix::hookContext(context);
 
   if (ppDevice) {
     device->AddRef();
@@ -167,7 +167,7 @@ DLLEXPORT HRESULT __stdcall D3D11CreateDeviceAndSwapChain(
     return hr;
 
   atfix::hookDevice(device);
-  atfix::hookContext(context);
+  context = atfix::hookContext(context);
 
   if (ppDevice) {
     device->AddRef();
